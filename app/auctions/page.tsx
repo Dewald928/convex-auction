@@ -3,7 +3,7 @@
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Id } from "../../convex/_generated/dataModel";
 import React from "react";
 import { ConvexError } from "convex/values";
@@ -86,7 +86,10 @@ export default function Auctions() {
   }) as PaginatedAuctions | undefined;
 
   // Extract auctions and pagination info
-  const auctions = paginatedResult?.auctions || [];
+  const auctions = useMemo(
+    () => paginatedResult?.auctions || [],
+    [paginatedResult?.auctions],
+  );
   const totalCount = paginatedResult?.totalCount || 0;
   const totalPages = Math.ceil(totalCount / itemsPerPage);
 
@@ -162,15 +165,15 @@ export default function Auctions() {
   };
 
   // Calculate the next valid bid amount for an auction
-  const calculateNextValidBid = (auction: Auction) => {
+  const calculateNextValidBid = useCallback((auction: Auction) => {
     const minIncrement = auction.bidIncrementMinimum || 1;
     return auction.currentPrice + minIncrement;
-  };
+  }, []);
 
   // Update quick bid amounts when auctions load or change
   useEffect(() => {
-    if (auctions) {
-      const newQuickBidAmounts: Record<string, number> = {};
+    if (auctions && auctions.length > 0) {
+      const newQuickBidAmounts: Record<Id<"auctions">, number> = {};
       auctions.forEach((auction) => {
         newQuickBidAmounts[auction._id] = calculateNextValidBid(auction);
       });
@@ -179,7 +182,7 @@ export default function Auctions() {
         ...newQuickBidAmounts,
       }));
     }
-  }, [auctions]);
+  }, [auctions, calculateNextValidBid]);
 
   const handleQuickBid = async (auctionId: Id<"auctions">, amount: number) => {
     try {

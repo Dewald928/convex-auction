@@ -3,7 +3,7 @@
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import Link from "next/link";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Id } from "../../../convex/_generated/dataModel";
 import { useParams } from "next/navigation";
 import { ConvexError } from "convex/values";
@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import Image from "next/image";
 
 export default function AuctionDetail() {
   const { isAuthenticated } = useConvexAuth();
@@ -156,7 +157,7 @@ export default function AuctionDetail() {
   });
 
   // Calculate the next valid bid amount
-  const calculateNextValidBid = () => {
+  const calculateNextValidBid = useCallback(() => {
     if (!auction) return "";
 
     const minIncrement = auction.bidIncrementMinimum || 0.01;
@@ -164,14 +165,19 @@ export default function AuctionDetail() {
       Math.floor((auction.currentPrice + minIncrement) * 100) / 100
     ).toFixed(2);
     return nextBid;
-  };
+  }, [auction]);
 
   // Set the initial bid amount when the auction data loads
   useEffect(() => {
     if (auction) {
       setBidAmount(calculateNextValidBid());
     }
-  }, [auction?.currentPrice, auction?.bidIncrementMinimum]);
+  }, [
+    auction?.currentPrice,
+    auction?.bidIncrementMinimum,
+    auction,
+    calculateNextValidBid,
+  ]);
 
   if (!isAuthenticated) {
     return (
@@ -292,10 +298,12 @@ export default function AuctionDetail() {
         <div className="flex flex-col md:flex-row gap-8">
           <div className="md:w-1/2">
             {auction.imageUrl ? (
-              <img
+              <Image
                 src={auction.imageUrl}
                 alt={auction.title}
                 className="w-full h-auto rounded-lg"
+                width={500}
+                height={300}
               />
             ) : (
               <div className="w-full h-64 bg-slate-200 dark:bg-slate-800 rounded-lg flex items-center justify-center">
