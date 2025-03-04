@@ -8,6 +8,15 @@ import { Id } from "../../../convex/_generated/dataModel";
 import { useParams } from "next/navigation";
 import { ConvexError } from "convex/values";
 import { Toaster, toast } from "react-hot-toast";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 export default function AuctionDetail() {
   const { isAuthenticated } = useConvexAuth();
@@ -21,6 +30,7 @@ export default function AuctionDetail() {
   const placeBid = useMutation(api.bids.placeBid);
   const [bidAmount, setBidAmount] = useState("");
   const [error, setError] = useState("");
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<{
     days: number;
     hours: number;
@@ -145,6 +155,24 @@ export default function AuctionDetail() {
     limit: 5,
   });
 
+  // Calculate the next valid bid amount
+  const calculateNextValidBid = () => {
+    if (!auction) return "";
+
+    const minIncrement = auction.bidIncrementMinimum || 0.01;
+    const nextBid = (
+      Math.floor((auction.currentPrice + minIncrement) * 100) / 100
+    ).toFixed(2);
+    return nextBid;
+  };
+
+  // Set the initial bid amount when the auction data loads
+  useEffect(() => {
+    if (auction) {
+      setBidAmount(calculateNextValidBid());
+    }
+  }, [auction?.currentPrice, auction?.bidIncrementMinimum]);
+
   if (!isAuthenticated) {
     return (
       <div className="p-8 text-center">
@@ -178,12 +206,34 @@ export default function AuctionDetail() {
       return;
     }
 
+    // Check if bid meets minimum increment if set
+    if (
+      auction.bidIncrementMinimum !== undefined &&
+      amount < auction.currentPrice + auction.bidIncrementMinimum
+    ) {
+      setError(
+        `Bid must be at least $${(auction.currentPrice + auction.bidIncrementMinimum).toFixed(2)}`,
+      );
+      return;
+    }
+
+    // Open the confirmation dialog
+    setIsDialogOpen(true);
+  };
+
+  const confirmBid = async () => {
     try {
+      const amount = parseFloat(bidAmount);
       const result = await placeBid({
         auctionId,
         amount,
       });
-      setBidAmount("");
+
+      // Close the dialog
+      setIsDialogOpen(false);
+
+      // Reset bid amount to next valid bid
+      setBidAmount(calculateNextValidBid());
 
       // Show toast notification if the auction was extended
       if (result.wasExtended) {
@@ -212,12 +262,13 @@ export default function AuctionDetail() {
         });
       }
     } catch (error) {
-      const errorMessage =
-        error instanceof ConvexError
-          ? error.data
-          : "Unexpected error occurred" + error;
-
-      setError(errorMessage);
+      setIsDialogOpen(false);
+      if (error instanceof ConvexError) {
+        setError(error.data);
+      } else {
+        setError("An error occurred while placing your bid");
+        console.error(error);
+      }
     }
   };
 
@@ -361,7 +412,10 @@ export default function AuctionDetail() {
                       onChange={(e) => setBidAmount(e.target.value)}
                       placeholder={`> ${auction.currentPrice.toFixed(2)}`}
                       step="0.01"
-                      min={auction.currentPrice + 0.01}
+                      min={
+                        auction.currentPrice +
+                        (auction.bidIncrementMinimum || 0.01)
+                      }
                       className="w-full pl-7 p-2 border rounded bg-background"
                       required
                     />
@@ -373,6 +427,56 @@ export default function AuctionDetail() {
                     Place Bid
                   </button>
                 </div>
+
+                {/* Confirmation Dialog */}
+                <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Confirm Your Bid</DialogTitle>
+                      <DialogDescription>
+                        You are about to place a bid of $
+                        {parseFloat(bidAmount).toFixed(2)} on &quot;
+                        {auction.title}&quot;. This action cannot be undone.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                      <div className="flex justify-between mb-2">
+                        <span className="text-sm text-gray-500">
+                          Current Price:
+                        </span>
+                        <span className="font-medium">
+                          ${auction.currentPrice.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between mb-2">
+                        <span className="text-sm text-gray-500">Your Bid:</span>
+                        <span className="font-medium">
+                          ${parseFloat(bidAmount).toFixed(2)}
+                        </span>
+                      </div>
+                      {auction.bidIncrementMinimum && (
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-500">
+                            Minimum Increment:
+                          </span>
+                          <span className="font-medium">
+                            ${auction.bidIncrementMinimum.toFixed(2)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <DialogFooter>
+                      <Button
+                        variant="outline"
+                        onClick={() => setIsDialogOpen(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button onClick={confirmBid}>Confirm Bid</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+
                 {error && (
                   <div className="mt-3 bg-red-50 border border-red-200 rounded-md p-3 flex items-start">
                     <div className="flex-shrink-0">

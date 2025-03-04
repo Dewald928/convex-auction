@@ -8,6 +8,15 @@ import { Id } from "../../convex/_generated/dataModel";
 import React from "react";
 import { ConvexError } from "convex/values";
 import { toast, Toaster } from "react-hot-toast";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 // Define the auction type
 interface Auction {
@@ -62,6 +71,10 @@ export default function Auctions() {
   const [currentPage, setCurrentPage] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const itemsPerPage = 10;
+  const [confirmBidAuctionId, setConfirmBidAuctionId] =
+    useState<Id<"auctions"> | null>(null);
+  const [confirmBidAmount, setConfirmBidAmount] = useState<number | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   // Fetch paginated auctions
   const paginatedResult = useQuery(api.auctions.listAuctions, {
@@ -148,32 +161,109 @@ export default function Auctions() {
     return { days, hours, minutes, seconds };
   };
 
+  // Calculate the next valid bid amount for an auction
+  const calculateNextValidBid = (auction: Auction) => {
+    const minIncrement = auction.bidIncrementMinimum || 1;
+    return auction.currentPrice + minIncrement;
+  };
+
+  // Update quick bid amounts when auctions load or change
+  useEffect(() => {
+    if (auctions) {
+      const newQuickBidAmounts: Record<string, number> = {};
+      auctions.forEach((auction) => {
+        newQuickBidAmounts[auction._id] = calculateNextValidBid(auction);
+      });
+      setQuickBidAmounts((prev) => ({
+        ...prev,
+        ...newQuickBidAmounts,
+      }));
+    }
+  }, [auctions]);
+
   const handleQuickBid = async (auctionId: Id<"auctions">, amount: number) => {
     try {
       // Clear any previous errors
       setBidErrors((prev) => ({ ...prev, [auctionId]: "" }));
 
-      await placeBid({
-        auctionId,
-        amount,
-      });
-
-      toast.success("Bid placed successfully!");
-
-      // Update the quick bid amount for next time
+      // Validate the bid amount
       const auction = auctions?.find((a) => a._id === auctionId);
-      if (auction) {
-        const minIncrement = auction.bidIncrementMinimum || 1;
-        setQuickBidAmounts((prev) => ({
-          ...prev,
-          [auctionId]: amount + minIncrement,
-        }));
+      if (!auction) {
+        throw new Error("Auction not found");
       }
+
+      if (amount <= auction.currentPrice) {
+        setBidErrors((prev) => ({
+          ...prev,
+          [auctionId]: `Bid must be higher than current price: $${auction.currentPrice.toFixed(2)}`,
+        }));
+        return;
+      }
+
+      if (
+        auction.bidIncrementMinimum !== undefined &&
+        amount < auction.currentPrice + auction.bidIncrementMinimum
+      ) {
+        const minBid =
+          auction.currentPrice + (auction.bidIncrementMinimum || 0);
+        setBidErrors((prev) => ({
+          ...prev,
+          [auctionId]: `Bid must be at least $${minBid.toFixed(2)}`,
+        }));
+        return;
+      }
+
+      // Set the confirmation dialog data
+      setConfirmBidAuctionId(auctionId);
+      setConfirmBidAmount(amount);
+      setIsDialogOpen(true);
     } catch (error) {
       const errorMessage =
         error instanceof ConvexError ? error.data : "Error placing bid";
       setBidErrors((prev) => ({ ...prev, [auctionId]: errorMessage }));
       toast.error(errorMessage);
+    }
+  };
+
+  const confirmBid = async () => {
+    if (!confirmBidAuctionId || confirmBidAmount === null) {
+      setIsDialogOpen(false);
+      return;
+    }
+
+    try {
+      await placeBid({
+        auctionId: confirmBidAuctionId,
+        amount: confirmBidAmount,
+      });
+
+      toast.success("Bid placed successfully!");
+
+      // Update the quick bid amount for next time
+      const auction = auctions?.find((a) => a._id === confirmBidAuctionId);
+      if (auction) {
+        const minIncrement = auction.bidIncrementMinimum || 1;
+        setQuickBidAmounts((prev) => ({
+          ...prev,
+          [confirmBidAuctionId]: confirmBidAmount + minIncrement,
+        }));
+      }
+
+      // Close the dialog
+      setIsDialogOpen(false);
+      setConfirmBidAuctionId(null);
+      setConfirmBidAmount(null);
+    } catch (error) {
+      const errorMessage =
+        error instanceof ConvexError ? error.data : "Error placing bid";
+      if (confirmBidAuctionId) {
+        setBidErrors((prev) => ({
+          ...prev,
+          [confirmBidAuctionId]: errorMessage,
+        }));
+      }
+      toast.error(errorMessage);
+      setIsDialogOpen(false);
     }
   };
 
@@ -466,6 +556,64 @@ export default function Auctions() {
           </>
         )}
       </main>
+
+      {/* Confirmation Dialog */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Your Bid</DialogTitle>
+            <DialogDescription>
+              {confirmBidAuctionId && confirmBidAmount !== null && auctions && (
+                <>
+                  You are about to place a bid of ${confirmBidAmount.toFixed(2)}{" "}
+                  on &quot;
+                  {auctions.find((a) => a._id === confirmBidAuctionId)?.title}
+                  &quot;. This action cannot be undone.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {confirmBidAuctionId && confirmBidAmount !== null && auctions && (
+            <div className="py-4">
+              <div className="flex justify-between mb-2">
+                <span className="text-sm text-gray-500">Current Price:</span>
+                <span className="font-medium">
+                  $
+                  {auctions
+                    .find((a) => a._id === confirmBidAuctionId)
+                    ?.currentPrice.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex justify-between mb-2">
+                <span className="text-sm text-gray-500">Your Bid:</span>
+                <span className="font-medium">
+                  ${confirmBidAmount.toFixed(2)}
+                </span>
+              </div>
+              {auctions.find((a) => a._id === confirmBidAuctionId)
+                ?.bidIncrementMinimum && (
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-500">
+                    Minimum Increment:
+                  </span>
+                  <span className="font-medium">
+                    $
+                    {auctions
+                      .find((a) => a._id === confirmBidAuctionId)
+                      ?.bidIncrementMinimum?.toFixed(2)}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={confirmBid}>Confirm Bid</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
