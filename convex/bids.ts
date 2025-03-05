@@ -126,6 +126,18 @@ export const placeBid = mutation({
       timestamp: Date.now(),
     });
 
+    // Trigger auto bid processing after a short delay
+    // This allows other auto bids to respond to this new bid
+    try {
+      await ctx.scheduler.runAfter(1000, internal.autoBids.onNewBid, {
+        auctionId: args.auctionId,
+        bidId,
+      });
+    } catch (error) {
+      // Log the error but don't fail the bid placement
+      console.error("Failed to schedule auto bid processing:", error);
+    }
+
     // Return the bid ID and extension information
     return {
       bidId,

@@ -17,43 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-
-// Define the auction type
-interface Auction {
-  _id: Id<"auctions">;
-  title: string;
-  description: string;
-  imageUrl?: string;
-  startingPrice: number;
-  currentPrice: number;
-  startTime: number;
-  endTime: number;
-  creatorId: Id<"users">;
-  status: "upcoming" | "active" | "ended" | "canceled";
-  creatorName: string;
-  bidIncrementMinimum?: number;
-  highestBid: {
-    _id: Id<"bids">;
-    amount: number;
-    bidderId: Id<"users">;
-    timestamp: number;
-  } | null;
-  myBid: {
-    _id: Id<"bids">;
-    amount: number;
-    bidderId: Id<"users">;
-    timestamp: number;
-  } | null;
-  computedStatus?: "active" | "upcoming" | "ended";
-}
-
-// Define pagination result type
-interface PaginatedAuctions {
-  auctions: Auction[];
-  isDone: boolean;
-  continueCursor: string | null;
-  totalCount: number;
-}
+import { Doc } from "../../convex/_generated/dataModel";
 
 export default function Auctions() {
   const { isAuthenticated } = useConvexAuth();
@@ -83,7 +47,7 @@ export default function Auctions() {
       numItems: itemsPerPage,
       cursor: currentPage > 0 ? (currentPage * itemsPerPage).toString() : null,
     },
-  }) as PaginatedAuctions | undefined;
+  });
 
   // Extract auctions and pagination info
   const auctions = useMemo(
@@ -165,7 +129,7 @@ export default function Auctions() {
   };
 
   // Calculate the next valid bid amount for an auction
-  const calculateNextValidBid = useCallback((auction: Auction) => {
+  const calculateNextValidBid = useCallback((auction: Doc<"auctions">) => {
     const minIncrement = auction.bidIncrementMinimum || 1;
     return auction.currentPrice + minIncrement;
   }, []);
@@ -270,15 +234,7 @@ export default function Auctions() {
     }
   };
 
-  const getAuctionStatus = (auction: Auction) => {
-    // Use the pre-computed status if available
-    if (auction.computedStatus) {
-      return (
-        auction.computedStatus.charAt(0).toUpperCase() +
-        auction.computedStatus.slice(1)
-      );
-    }
-
+  const getAuctionStatus = (auction: Doc<"auctions">) => {
     // Otherwise calculate it
     const now = Date.now();
     if (now < auction.startTime) return "Upcoming";
@@ -416,6 +372,9 @@ export default function Auctions() {
           </Link>
           <Link href="/coupons" className="hover:underline">
             My Coupons
+          </Link>
+          <Link href="/auto-bids" className="hover:underline">
+            Auto Bidding
           </Link>
         </div>
       </header>

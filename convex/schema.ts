@@ -42,6 +42,33 @@ export default defineSchema({
     bidderId: v.id("users"),
     timestamp: v.number(),
   }).index("by_auction", ["auctionId"]),
+  // Auto bids table for the auto bidding system
+  autoBids: defineTable({
+    userId: v.id("users"), // User who created this auto bid
+    maxAmount: v.number(), // Maximum amount user is willing to pay per auction
+    maxAuctions: v.number(), // Maximum number of auctions to participate in
+    createdAt: v.number(), // When this auto bid was created (for preference ordering)
+    isActive: v.boolean(), // Whether this auto bid is currently active
+    auctionsParticipated: v.optional(v.array(v.id("auctions"))), // List of auctions this auto bid has participated in
+    auctionsWon: v.optional(v.array(v.id("auctions"))), // List of auctions this auto bid has won
+    remainingAuctions: v.number(), // Number of auctions remaining to participate in
+  })
+    .index("by_user", ["userId"])
+    .index("by_active", ["isActive"]),
+  // Track auto bid participation in specific auctions
+  autoBidParticipations: defineTable({
+    autoBidId: v.id("autoBids"), // The auto bid configuration
+    auctionId: v.id("auctions"), // The auction being participated in
+    userId: v.id("users"), // User who owns this auto bid
+    maxAmount: v.number(), // Maximum amount for this auction
+    isActive: v.boolean(), // Whether this participation is active
+    lastBidId: v.optional(v.id("bids")), // The last bid placed by this auto bid
+    lastBidAmount: v.optional(v.number()), // Amount of the last bid placed
+    createdAt: v.number(), // When this participation was created
+  })
+    .index("by_auction_active", ["auctionId", "isActive"])
+    .index("by_autoBid", ["autoBidId"])
+    .index("by_user_auction", ["userId", "auctionId"]),
   couponBundles: defineTable({
     quantity: v.number(),
     description: v.string(),

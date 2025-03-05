@@ -1,5 +1,6 @@
 import { internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 
 // Gets the highest bid for an auction
 export const getAuctionWinner = internalQuery({
@@ -118,61 +119,70 @@ export const processEndedAuction = internalMutation({
       .order("desc")
       .first();
 
-    if (!winner) {
-      // No bids, no winner to notify
-      await ctx.db.patch(args.auctionId, { winnerNotified: true });
-      return false;
-    }
+    let winnerId = undefined;
+    if (winner) {
+      winnerId = winner.bidderId;
 
-    // Get the winner's user information
-    const winnerUser = await ctx.db.get(winner.bidderId);
-    if (!winnerUser || !winnerUser.email) {
-      // Can't notify without an email
-      return false;
-    }
-
-    // Get the coupon bundle for this auction
-    if (!auction.couponBundleId) {
-      console.error(`No coupon bundle found for auction ${args.auctionId}`);
-      return false;
-    }
-
-    const couponBundle = await ctx.db.get(auction.couponBundleId);
-    if (!couponBundle) {
-      console.error(`Coupon bundle ${auction.couponBundleId} not found`);
-      return false;
-    }
-
-    // Update the coupon bundle with the winner ID
-    await ctx.db.patch(couponBundle._id, {
-      winnerId: winner.bidderId,
-    });
-
-    // Check if coupons have already been generated for this bundle
-    const existingCoupons = await ctx.db
-      .query("coupons")
-      .withIndex("by_bundle", (q) => q.eq("bundleId", couponBundle._id))
-      .collect();
-
-    // Generate coupons if they don't exist yet
-    if (existingCoupons.length === 0) {
-      // Create empty coupons without codes - they'll be generated upon redemption
-      for (let i = 1; i <= couponBundle.quantity; i++) {
-        // Create the individual coupon without a code
-        await ctx.db.insert("coupons", {
-          bundleId: couponBundle._id,
-          ownerId: winner.bidderId,
-          isRedeemed: false,
-          redeemedBy: undefined,
-          redeemedAt: undefined,
-        });
+      // Get the winner's user information
+      const winnerUser = await ctx.db.get(winner.bidderId);
+      if (!winnerUser || !winnerUser.email) {
+        // Can't notify without an email
+        return false;
       }
+
+      // Get the coupon bundle for this auction
+      if (!auction.couponBundleId) {
+        console.error(`No coupon bundle found for auction ${args.auctionId}`);
+        return false;
+      }
+
+      const couponBundle = await ctx.db.get(auction.couponBundleId);
+      if (!couponBundle) {
+        console.error(`Coupon bundle ${auction.couponBundleId} not found`);
+        return false;
+      }
+
+      // Update the coupon bundle with the winner ID
+      await ctx.db.patch(couponBundle._id, {
+        winnerId: winner.bidderId,
+      });
+
+      // Check if coupons have already been generated for this bundle
+      const existingCoupons = await ctx.db
+        .query("coupons")
+        .withIndex("by_bundle", (q) => q.eq("bundleId", couponBundle._id))
+        .collect();
+
+      // Generate coupons if they don't exist yet
+      if (existingCoupons.length === 0) {
+        // Create empty coupons without codes - they'll be generated upon redemption
+        for (let i = 1; i <= couponBundle.quantity; i++) {
+          // Create the individual coupon without a code
+          await ctx.db.insert("coupons", {
+            bundleId: couponBundle._id,
+            ownerId: winner.bidderId,
+            isRedeemed: false,
+            redeemedBy: undefined,
+            redeemedAt: undefined,
+          });
+        }
+      }
+
+      // ⚠️ In a real implementation, you would send an email with instructions on how to redeem coupons
+      console.log(
+        `Sending notification to ${winnerUser.email} for winning auction ${auction.title} with ${couponBundle.quantity} coupons`,
+        `Visit the My Coupons page to view and redeem your coupons.`,
+      );
     }
 
-    // ⚠️ In a real implementation, you would send an email with instructions on how to redeem coupons
-    console.log(
-      `Sending notification to ${winnerUser.email} for winning auction ${auction.title} with ${couponBundle.quantity} coupons`,
-      `Visit the My Coupons page to view and redeem your coupons.`,
+    // Update auto bids for this auction
+    await ctx.scheduler.runAfter(
+      0,
+      internal.autoBids.updateAutoBidOnAuctionEnd,
+      {
+        auctionId: args.auctionId,
+        winnerId: winnerId,
+      },
     );
 
     // Mark the auction as notified

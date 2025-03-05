@@ -337,3 +337,131 @@ export const getAuctionDetails = query({
     };
   },
 });
+
+export const listActiveAuctions = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      return [];
+    }
+
+    const now = Date.now();
+
+    // Get all active auctions
+    const activeAuctions = await ctx.db
+      .query("auctions")
+      .filter((q) =>
+        q.and(q.lt(q.field("startTime"), now), q.gt(q.field("endTime"), now)),
+      )
+      .collect();
+
+    // Add creator info and highest bid info
+    const auctionsWithDetails = await Promise.all(
+      activeAuctions.map(async (auction) => {
+        const creator = await ctx.db.get(auction.creatorId);
+
+        // Get the highest bid for this auction
+        const highestBid = await ctx.db
+          .query("bids")
+          .withIndex("by_auction", (q) => q.eq("auctionId", auction._id))
+          .order("desc")
+          .first();
+
+        // Get the user's highest bid for this auction (if they have one)
+        const myBids = await ctx.db
+          .query("bids")
+          .withIndex("by_auction", (q) => q.eq("auctionId", auction._id))
+          .filter((q) => q.eq(q.field("bidderId"), userId))
+          .order("desc")
+          .first();
+
+        // Check if user already has an active participation for this auction
+        const existingParticipation = await ctx.db
+          .query("autoBidParticipations")
+          .withIndex("by_user_auction", (q) =>
+            q.eq("userId", userId).eq("auctionId", auction._id),
+          )
+          .filter((q) => q.eq(q.field("isActive"), true))
+          .first();
+
+        return {
+          ...auction,
+          creatorName: creator?.email ?? "Unknown",
+          highestBid: highestBid || null,
+          myBid: myBids || null,
+          hasAutoBid: !!existingParticipation,
+          autoBidMaxAmount: existingParticipation?.maxAmount || null,
+        };
+      }),
+    );
+
+    // Sort by end time (soonest ending first)
+    return auctionsWithDetails.sort((a, b) => a.endTime - b.endTime);
+  },
+});
+
+export const deleteAuction = mutation({
+  args: {
+    auctionId: v.id("auctions"),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      throw new Error("You must be logged in to delete an auction");
+    }
+
+    // Get the auction
+    const auction = await ctx.db.get(args.auctionId);
+    if (!auction) {
+      throw new Error("Auction not found");
+    }
+
+    // Check if the user is the creator of the auction
+    if (auction.creatorId !== userId) {
+      throw new Error("You can only delete auctions you created");
+    }
+
+    // Get all bids for this auction
+    const bids = await ctx.db
+      .query("bids")
+      .withIndex("by_auction", (q) => q.eq("auctionId", args.auctionId))
+      .collect();
+
+    // Delete all bids
+    for (const bid of bids) {
+      await ctx.db.delete(bid._id);
+    }
+
+    // Delete any auto bid participations for this auction
+    const autoBidParticipations = await ctx.db
+      .query("autoBidParticipations")
+      .withIndex("by_auction_active", (q) => q.eq("auctionId", args.auctionId))
+      .collect();
+
+    for (const participation of autoBidParticipations) {
+      await ctx.db.delete(participation._id);
+    }
+
+    // Delete any auction events for this auction
+    const auctionEvents = await ctx.db
+      .query("auctionEvents")
+      .withIndex("by_auction_recent", (q) => q.eq("auctionId", args.auctionId))
+      .collect();
+
+    for (const event of auctionEvents) {
+      await ctx.db.delete(event._id);
+    }
+
+    // Delete the coupon bundle if it exists
+    if (auction.couponBundleId) {
+      await ctx.db.delete(auction.couponBundleId);
+    }
+
+    // Delete the auction
+    await ctx.db.delete(args.auctionId);
+
+    return true;
+  },
+});
