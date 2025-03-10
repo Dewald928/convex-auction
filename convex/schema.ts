@@ -72,4 +72,27 @@ export default defineSchema({
       bidAmount: v.optional(v.number()),
     }),
   }).index("by_auction_recent", ["auctionId", "timestamp"]),
+
+  // Auto-bidding system
+  autobids: defineTable({
+    userId: v.id("users"),
+    maxBidAmount: v.number(), // Maximum amount user is willing to pay
+    targetAuctionCount: v.number(), // Number of auctions user wants to win
+    createdAt: v.number(), // When the auto-bid was created
+    isActive: v.boolean(), // Whether the auto-bid is active
+    currentWinCount: v.number(), // Current number of auctions won
+    lastProcessedAt: v.optional(v.number()), // When the auto-bid was last processed
+  })
+    .index("by_user", ["userId"])
+    .index("by_active", ["isActive"]),
+
+  // Track which auctions an auto-bid is currently winning
+  autobidAuctions: defineTable({
+    autobidId: v.id("autobids"),
+    auctionId: v.id("auctions"),
+    bidId: v.id("bids"),
+  })
+    .index("by_autobid", ["autobidId"])
+    .index("by_auction", ["auctionId"])
+    .index("by_bid", ["bidId"]),
 });
