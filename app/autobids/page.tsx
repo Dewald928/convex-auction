@@ -35,6 +35,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Trash2 } from "lucide-react";
+import AutobidVolumeGraph from "@/components/AutobidVolumeGraph";
 
 export default function AutoBids() {
   const [maxBidAmount, setMaxBidAmount] = useState<number>(0);
@@ -52,6 +53,12 @@ export default function AutoBids() {
 
   // Get auto-bid orderbook
   const autoBidOrderbook = useQuery(api.autobids.getAutoBidOrderbook);
+
+  // Get active auctions for the graph
+  const activeAuctions = useQuery(api.autobids.getActiveAuctionsForGraph);
+
+  // Get leading autobids for the graph
+  const leadingAutobids = useQuery(api.autobids.getLeadingAutobidsForGraph);
 
   // Create auto-bid mutation
   const createAutoBid = useMutation(api.autobids.createAutoBid);
@@ -177,6 +184,13 @@ export default function AutoBids() {
   return (
     <div className="container mx-auto py-8">
       <h1 className="text-3xl font-bold mb-8">Auto-Bidding System</h1>
+
+      {/* Autobid Volume Graph */}
+      <AutobidVolumeGraph
+        autoBidOrderbook={autoBidOrderbook}
+        activeAuctions={activeAuctions}
+        leadingAutobids={leadingAutobids}
+      />
 
       {/* Create Auto-Bid Form */}
       <Card className="mb-8">

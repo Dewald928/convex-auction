@@ -798,13 +798,31 @@ export const createTest = mutation({
     });
 
     const usersIds = await ctx.runMutation(internal.users.createTestUsers, {
-      count: 10,
+      count: 100,
     });
 
     for (const userId of usersIds) {
+      // Use Box-Muller transform to generate normally distributed values
+      // Mean of 505, standard deviation of 165 to cover range 10-1000
+      const mean = 505;
+      const stdDev = 165;
+
+      // Generate two independent random variables
+      const u1 = Math.random();
+      const u2 = Math.random();
+
+      // Box-Muller transform
+      const z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+
+      // Transform to desired mean and standard deviation
+      let maxBidAmount = Math.round(z0 * stdDev + mean);
+
+      // Ensure the value is within the 10-1000 range
+      maxBidAmount = Math.max(10, Math.min(1000, maxBidAmount));
+
       await createAutoBid(ctx, {
         userId,
-        maxBidAmount: Math.floor(Math.random() * 1000),
+        maxBidAmount,
         targetAuctionCount: Math.max(1, Math.floor(Math.random() * 10)),
       });
     }
@@ -1123,5 +1141,122 @@ export const updateAutobidWinCount = internalMutation({
       `✅ Updated autobid ${args.autobidId} current win count to ${args.winCount}`,
     );
     return null;
+  },
+});
+
+// Get active auctions for the graph
+export const getActiveAuctionsForGraph = query({
+  args: {},
+  returns: v.array(
+    v.object({
+      _id: v.id("auctions"),
+      title: v.string(),
+      currentPrice: v.number(),
+      status: v.string(),
+    }),
+  ),
+  handler: async (ctx) => {
+    const now = Date.now();
+
+    // Get active auctions
+    const activeAuctions = await ctx.db
+      .query("auctions")
+      .filter((q) =>
+        q.and(q.lte(q.field("startTime"), now), q.gte(q.field("endTime"), now)),
+      )
+      .collect();
+
+    return activeAuctions.map((auction) => ({
+      _id: auction._id,
+      title: auction.title,
+      currentPrice: auction.currentPrice,
+      status: "active",
+    }));
+  },
+});
+
+// Get leading autobids data for the graph
+export const getLeadingAutobidsForGraph = query({
+  args: {},
+  returns: v.array(
+    v.object({
+      maxBidAmount: v.number(),
+      leadingCount: v.number(),
+    }),
+  ),
+  handler: async (ctx) => {
+    // Get all active autobids
+    const autoBids = await ctx.db
+      .query("autobids")
+      .withIndex("by_active", (q) => q.eq("isActive", true))
+      .collect();
+
+    // Group autobids by max bid amount
+    const maxBidAmounts = new Set<number>();
+    for (const autoBid of autoBids) {
+      maxBidAmounts.add(autoBid.maxBidAmount);
+    }
+
+    // For each max bid amount, count the number of leading autobids
+    const result: Array<{ maxBidAmount: number; leadingCount: number }> = [];
+
+    for (const maxBidAmount of maxBidAmounts) {
+      // Get all autobids with this max bid amount
+      const autobidsWithMaxAmount = autoBids.filter(
+        (autoBid) => autoBid.maxBidAmount === maxBidAmount,
+      );
+
+      // Count leading auctions for these autobids
+      let totalLeadingCount = 0;
+      for (const autoBid of autobidsWithMaxAmount) {
+        // Get all autobidAuctions records for this autobid
+        const autobidAuctions = await ctx.db
+          .query("autobidAuctions")
+          .withIndex("by_autobid", (q) => q.eq("autobidId", autoBid._id))
+          .collect();
+
+        if (autobidAuctions.length === 0) {
+          continue;
+        }
+
+        // Get all auction IDs and bid IDs
+        const auctionIds = autobidAuctions.map((record) => record.auctionId);
+        const bidIds = autobidAuctions.map((record) => record.bidId);
+
+        // Fetch all auctions and bids in parallel
+        const [auctions, bids] = await Promise.all([
+          Promise.all(auctionIds.map((id) => ctx.db.get(id))),
+          Promise.all(bidIds.map((id) => ctx.db.get(id))),
+        ]);
+
+        // Current time
+        const now = Date.now();
+
+        // Count active auctions where this autobid has the highest bid
+        for (let i = 0; i < auctions.length; i++) {
+          const auction = auctions[i];
+          const bid = bids[i];
+
+          if (
+            auction &&
+            bid &&
+            auction.status === "active" &&
+            auction.endTime > now &&
+            bid.amount === auction.currentPrice
+          ) {
+            totalLeadingCount++;
+          }
+        }
+      }
+
+      // Add to result for all price points, even if leading count is 0
+      result.push({
+        maxBidAmount,
+        leadingCount: totalLeadingCount,
+      });
+    }
+
+    // Sort by max bid amount (descending)
+    return result.sort((a, b) => b.maxBidAmount - a.maxBidAmount);
   },
 });
