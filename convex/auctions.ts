@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { internal } from "./_generated/api";
-import { Doc } from "./_generated/dataModel";
+import { Doc, Id } from "./_generated/dataModel";
 import { paginationOptsValidator } from "convex/server";
 
 // Define proper types for the coupon bundle
@@ -30,7 +30,7 @@ export const createAuction = mutation({
   },
   returns: v.union(v.id("auctions"), v.array(v.id("auctions"))),
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = (await getAuthUserId(ctx)) as Id<"users">;
     if (!userId) {
       throw new Error("You must be logged in to create an auction");
     }
@@ -195,7 +195,7 @@ export const listAuctions = query({
     // Add user info for each auction creator
     const auctionsWithUsers = await Promise.all(
       allAuctions.map(async (auction) => {
-        const creator = await ctx.db.get(auction.creatorId);
+        const creator = await ctx.db.get(auction.creatorId as Id<"users">);
 
         // Get the highest bid for this auction
         const highestBid = await ctx.db
@@ -307,7 +307,7 @@ export const getAuctionDetails = query({
       }),
     );
 
-    const creator = await ctx.db.get(auction.creatorId);
+    const creator = await ctx.db.get(auction.creatorId as Id<"users">);
 
     // Fetch the coupon bundle if available
     let couponBundle: CouponBundle | null = null;
